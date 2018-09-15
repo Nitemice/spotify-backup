@@ -6,7 +6,7 @@ from pathlib import Path
 from spotipy import Spotify
 
 import auth_server
-from config import PLAYLISTS_FOLDER, PLAYLIST_FIELDS
+from config import PLAYLISTS_FOLDER, PLAYLIST_FIELDS, TRACK_FIELDS
 
 
 def retrieve_all_items(spotify, result):
@@ -14,6 +14,16 @@ def retrieve_all_items(spotify, result):
     while result is not None:
         items.extend(result['items'])
         result = spotify.next(result)
+    return items
+
+
+def retrieve_all_tracks(spotify, tracks, owner_id, playlist_id):
+    items = tracks['items']
+    while len(items) < tracks['total']:
+        new_tracks = spotify.user_playlist_tracks(
+            user=owner_id, playlist_id=playlist_id, fields=TRACK_FIELDS, offset=len(items)
+        )
+        items.extend(new_tracks['items'])
     return items
 
 
@@ -44,11 +54,19 @@ def main():
                 continue
 
         print(f'Retrieving playlist: {name}')
+        # Determine which fields to retrieve
+        all_fields = PLAYLIST_FIELDS
+        if len(PLAYLIST_FIELDS) > 0:
+            all_fields += ', tracks(' + TRACK_FIELDS + ')'
         playlist = sp.user_playlist(
-            user=pl['owner']['id'], playlist_id=pl['id'], fields=PLAYLIST_FIELDS
+            user=pl['owner']['id'], playlist_id=pl['id'], fields=all_fields
         )
-        if 'tracks' in PLAYLIST_FIELDS:
-            playlist['tracks'] = retrieve_all_items(sp, playlist['tracks'])
+        # Retrieve the remaining tracks if the playlist contains over 100 tracks
+        if 'tracks' in playlist and 'total' in playlist['tracks'] and \
+                playlist['tracks']['total'] > 100:
+            playlist['tracks']['items'] = retrieve_all_tracks(sp, playlist['tracks'],
+                                                              pl['owner']['id'], pl['id'])
+
         backup_fpath.write_text(json.dumps(playlist))
 
     # Move deleted playlists elsewhere
