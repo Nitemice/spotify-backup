@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.request import HTTPError, Request, urlopen
 from urllib.parse import urlencode, urlparse, parse_qs
+from base64 import b64encode
 
 from config import TOKEN_FILE as RELATIVE_TOKEN_FILE
 from config import CLIENT_ID as SPOTIFY_CLIENT_ID, CLIENT_SECRET as SPOTIFY_CLIENT_SECRET
@@ -19,12 +20,6 @@ TOKEN_FILE = Path(__file__).parent / RELATIVE_TOKEN_FILE
 
 class AuthorizationError(Exception):
     pass
-
-
-def do_save_token(token):
-    token_path = Path(TOKEN_FILE).resolve()
-    token_path.touch(0o600, exist_ok=True)
-    token_path.write_text(token)
 
 
 def listen_for_token(port):
@@ -70,7 +65,7 @@ def create_request_handler():
             <p>{error}</p>
             </html>
         """
-        
+
         def do_GET(self):
             qs = urlparse(self.path).query
             qs_dict = parse_qs(qs)
@@ -95,20 +90,29 @@ def create_request_handler():
                 html = self._error_tpl.format(error=error)
             self.wfile.write(html.encode('utf8'))
             self.wfile.flush()
-    
+
     return AuthRequestHandler, shared_context
 
 
-def redeem_refresh_token(refresh_token):
-    request_params = urlencode({
+def do_save_token(token):
+    token_path = Path(TOKEN_FILE).resolve()
+    token_path.touch(0o600, exist_ok=True)
+    token_path.write_text(token)
+
+
+def redeem_refresh_token(refresh_token, new_token=True):
+    request_params = {
         'grant_type': 'authorization_code',
         'code': refresh_token,
-        'redirect_uri': REDIRECT_URI,
-        'client_id': SPOTIFY_CLIENT_ID,
-        'client_secret': SPOTIFY_CLIENT_SECRET
-    }).encode()
+        'redirect_uri': REDIRECT_URI
+    }
+    request_params = urlencode(request_params).encode()
+    auth_header = 'Basic ' + \
+                  b64encode(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET)
     url = f'https://accounts.spotify.com/api/token'
-    with urlopen(url, data=request_params) as response:
+    q = Request(url, data=request_params)
+    q.add_header(key='Authorization', val=auth_header)
+    with urlopen(q) as response:
         content = ast.literal_eval(response.read().decode())
         return content['access_token'], content['refresh_token']
 
